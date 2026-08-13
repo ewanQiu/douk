@@ -1,253 +1,266 @@
 # douk
 
-批量归档 TikTok 的**短剧（drama）**、合集（playlist / mix）、主页作品、收藏夹。
-采集与下载分离，可断点续跑、可增量更新。
+**English** | [简体中文](README.zh-CN.md)
 
-**短剧是当下最常见的形态** —— 一个短剧号会有几十部剧、每部几十集，界面上叫
-"N Episodes"。它和合集是两套不同的产品，接口也不同，见下方「四种形态」。
+Batch-archive complete TikTok **drama series** (短剧) — plus playlists/mixes,
+collections, and whole profiles. Collection and download are separate stages,
+so runs are resumable and incremental.
 
-## 为什么是这个架构
-
-实测（2026-08）确认了三件事，直接决定了实现路线：
-
-1. **yt-dlp 没有短剧/合集提取器。** 它的 `tiktok:collection` 只匹配
-   `/@user/collection/...`（收藏夹），既不匹配合集也不认短剧。「列清单」必须自己做。
-2. **匿名请求拿不到播放地址。** 视频页 SSR 里 `playAddr` / `downloadAddr` 都是空串，
-   `bitrateInfo` 是空数组，这也是 yt-dlp 报 `No video formats found` 的真正原因。
-   登录后同一个字段就有值了（实测 `bitrateInfo` 变成 9 档）。
-3. **列表接口要 `msToken` / `X-Gnarly` 签名。** 自己实现签名维护成本高，
-   交给真浏览器算最省事。
-
-结论：**登录态是硬门槛**，而签名交给真浏览器自己算最省事。所以：
-
-```
-Playwright（真浏览器，channel="chrome"）
-   ├─ 注入 cookies.txt 取得登录态
-   ├─ 采集：滚动页面，拦截 /api/drama/episode/item_list/ 等响应 → SQLite
-   └─ 按 dramaID 过滤、按 cursor 编集号
-                    ↓
-yt-dlp（带 cookie）并发下载 → data/videos/{剧名}/0001_xxx.mp4
-```
-
-`--impersonate` 会自动探测可用性 —— `curl_cffi` 装了不代表能用，版本超出 yt-dlp
-兼容区间时所有目标都是 unavailable，硬传这个参数会让每个下载任务直接失败。
-有 cookie 的情况下本来也不需要伪装。
-
-好处是 TikTok 改签名算法、改 DOM 结构都不影响采集链路。
-
-## 安装
+**Why this exists:** yt-dlp has no extractor for TikTok drama series. Its
+`tiktok:collection` matches only `/@user/collection/...` (saved collections),
+not drama series and not playlists. If you want an entire 30-, 50-, or 80-episode
+series with the episodes in the right order, you have to build the listing step
+yourself. That's what douk does.
 
 ```powershell
-.\setup.ps1
+.\setup.bat                                            # one-time setup
+.\douk sync "https://www.tiktok.com/@user/video/123"   # grab the whole series
 ```
 
-自动建 venv、装依赖、检查 Chrome/ffmpeg 并自检。手动装的话：
+## Features
+
+- **Whole series in one command.** Point it at *any* episode's URL; it finds the
+  series and pulls every episode.
+- **Correct episode numbers.** Taken from the API's `EpisodeNumber`, not from
+  upload time — a series' episodes are often published in one batch, so sorting
+  by timestamp gives you a shuffled mess.
+- **Resumable and incremental.** Progress lives in SQLite. Re-running only fetches
+  what's new; interrupted downloads pick up where they left off.
+- **Covers and metadata.** Series title, description, genre tags, episode count,
+  and total runtime are saved as `cover.jpg` + `drama.json` next to the videos.
+- **Codec choice.** H.264 for universal playback, H.265 for 1080p, or download
+  1080p H.265 and transcode to H.264 to get both.
+- **Subtitles, thumbnails, and per-episode metadata** via yt-dlp.
+- **`doctor` command** that checks egress IP, proxy/VPN flags, TikTok
+  reachability, browser, ffmpeg, and login state before you waste time debugging.
+
+## Requirements
+
+| | |
+|---|---|
+| Python | **3.11+** (uses `tomllib`) |
+| Chrome | Used via Playwright's `channel="chrome"`. Alternatively install Playwright's bundled Chromium and set `channel = ""`. |
+| ffmpeg | Optional — only needed for transcoding and thumbnail conversion |
+| Network | Must be able to reach TikTok. Set `proxy` in `config.toml` if yours can't. |
+
+Windows is the tested platform. The Python code is cross-platform, but the
+`setup` / `package` helper scripts are PowerShell.
+
+## Install
+
+```powershell
+.\setup.bat
+```
+
+Finds Python (installs it via winget if missing), creates a virtualenv, installs
+dependencies, checks Chrome and ffmpeg, then runs a self-check.
+
+> Run `setup.bat`, not `setup.ps1` — Windows blocks `.ps1` execution by default.
+> If you prefer the `.ps1`: `powershell -ExecutionPolicy Bypass -File .\setup.ps1`
+
+Manual install:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-# 只有在没装 Chrome、要用 Playwright 自带浏览器时才需要这句
+# only if you have no Chrome and want Playwright's bundled browser
 .\.venv\Scripts\python.exe -m playwright install chromium
 ```
 
-需要 **Python 3.11+**（用到 `tomllib`）。
+Then copy `config.example.toml` to `config.toml` and set `out_dir`.
 
-## 迁移到别的机器
+## Getting a session
+
+**This step is mandatory.** Without a login, TikTok's list endpoints return
+nothing and `playAddr` comes back as an empty string — which is the real reason
+yt-dlp reports `No video formats found` on these URLs.
+
+Everything reduces to one file: **`data/cookies.txt`**.
+
+### Option A — browser extension (easiest)
+
+1. Install *Get cookies.txt LOCALLY* (open source) from the Chrome Web Store
+2. Open **tiktok.com while logged in**
+3. Click the extension, confirm **Export Format is `Netscape`**, click **Export**
+   — not *Export All Cookies*, which dumps every site you use
+4. Save the downloaded file as `data/cookies.txt`
+
+### Option B — copy the Cookie request header
+
+The `Cookie:` request header contains every cookie, HttpOnly ones included.
+
+1. On tiktok.com, press F12 → **Network** → reload
+2. Click any request to tiktok.com → **Headers** → **Request Headers** → right-click
+   the `Cookie:` line → **Copy value**
+3. Save it to `data/header.txt`, then:
 
 ```powershell
-.\package.ps1        # 生成 douk-package.zip，约 0.05 MB
+.\douk cookies --from-header data\header.txt
 ```
 
-只打包源码和配置。`.venv`（164 MB）里写死了本机绝对路径、`data\browser`（231 MB）
-是本机浏览器状态，两者都必须在目标机重建，拷过去没有意义。
-目标机解压后跑 `.\setup.ps1` 即可。详见 [使用说明.md](使用说明.md) 第九节。
+> It must be `Cookie:` from **Request** Headers, not `Set-Cookie:` from the
+> response. The converter checks for `sessionid` and fails loudly if you got the
+> wrong one.
 
-> `package.ps1` / `setup.ps1` 必须存成 **UTF-8 with BOM**。Windows PowerShell 5.1
-> 读 `.ps1` 时按系统 ANSI（中文环境是 cp936）解码，无 BOM 的 UTF-8 中文注释会
-> 变成乱码并撞坏语法解析。
-
-## 配置
-
-编辑 `config.toml`。**大陆网络必须填 `proxy`**，TikTok 屏蔽中国大陆 IP。
-住宅代理比机房代理稳得多，机房 IP 很容易吃验证码。
-
-```toml
-[net]
-proxy = "http://127.0.0.1:7890"
-```
-
-## 用法
+### Verify
 
 ```powershell
-# 0) 先体检 —— 登录失败九成是 IP 问题，别急着改代码
-.\.venv\Scripts\python.exe douk.py doctor
-
-# 1) 拿登录态 —— 见下方「登录态怎么搞」，手动导出最稳
-#    导出好 cookies.txt 放进 data/ 之后，验证一下：
-.\.venv\Scripts\python.exe douk.py verify
-
-# 2) 一条龙：解析 -> 采集 -> 下载
-.\.venv\Scripts\python.exe douk.py sync "https://www.tiktok.com/@user/playlist/xxx-7123456789"
-
-# 其它
-douk.py resolve <url>          # 只看链接会被解析成什么目标
-douk.py collect <url>          # 只采清单不下载（加 --headful 可看着过验证码）
-douk.py download -t <targetId> # 下载/重试库里 pending+failed 的
-douk.py status                 # 看库存
+.\douk verify
 ```
 
-`sync` 可重复跑：已入库的视频不会重复下载，只补新增的——增量更新就是再跑一次。
+Prints which account TikTok recognizes. Cookies last weeks to months; when
+`verify` starts failing, export again.
 
-支持的链接形态：
+> `data/cookies.txt` is equivalent to your account password. Never commit or
+> share it — the bundled `.gitignore` excludes it.
 
-| 输入 | 行为 |
+**Why manual?** The `login`, `cookies --from`, and `import-profile` commands
+exist but none of them worked on the test machine: in-browser login is rejected
+because the automated environment is detected; Chrome 127+ encrypts its cookie
+store in a way that can't be read externally; and copying the browser profile
+fails because the key is bound to the original profile path. Manual export takes
+30 seconds and always works.
+
+## Usage
+
+```powershell
+.\douk doctor                  # check environment first
+.\douk dramas "<profile url>"  # list a creator's series
+.\douk sync "<any episode url>"   # resolve -> collect -> download
+.\douk status                  # what's in the library
+```
+
+Accepted URLs:
+
+| Input | Behavior |
 |---|---|
-| `/@user/video/123` | 反查该视频属于哪部剧 → 抓整部；不属于任何剧则退化为采主页 |
-| `/@user/playlist/xxx-123` | 采整个合集 |
-| `/@user/collection/xxx-123` | 采整个收藏夹 |
-| `/@user` | 采主页全部作品 |
+| `/@user/video/123` | Finds which series the video belongs to, grabs all of it. Falls back to the whole profile if it isn't part of one. |
+| `/@user/playlist/xxx-123` | The whole playlist/mix |
+| `/@user/collection/xxx-123` | The whole collection |
+| `/@user` | Every video on the profile |
 
-先看一个号有哪些剧：
+Useful flags:
 
 ```powershell
-.\.venv\Scripts\python.exe douk.py dramas "https://www.tiktok.com/@某账号"
+.\douk sync "<url>" --collect-only        # index without downloading
+.\douk download -t <id> --limit 3         # try a few episodes first
+.\douk sync "<url>" --codec transcode     # 1080p, transcoded to H.264
+.\douk sync "<url>" --headful             # watch the browser work
 ```
 
-## 四种形态
+Other commands: `collect`, `download`, `convert` (re-encode what you already
+have), `relocate` (rename/move files after changing naming settings),
+`info` (show series metadata).
 
-TikTok 上「一整部剧」有四种承载方式，接口完全不同，douk 都支持：
+## How series are stored on TikTok
 
-| 形态 | 接口 | 说明 |
+There are four different containers, each with its own endpoint. douk handles all
+four:
+
+| Container | Endpoint | Notes |
 |---|---|---|
-| **短剧 drama** | `/api/drama/episode/item_list/` | 当前主流。页面上是 `creator-drama-card`，**包在 `<button>` 里而非 `<a href>`**，所以页面上找不到任何链接，只能从接口反查 `dramaID` |
-| 合集 mix | `/api/mix/item_list/` | 老形态，URL 形如 `/playlist/名字-{mixId}` |
-| 收藏夹 | `/api/collection/item_list/` | 用户自建收藏 |
-| 主页作品 | `/api/post/item_list/` | 该号全部视频 |
+| **Drama series** | `/api/drama/episode/item_list/` | The dominant format today. Rendered as `creator-drama-card` wrapped in a `<button>`, **not an `<a href>`** — so there is no link on the page to follow; the series ID has to come from the API. |
+| Mix / playlist | `/api/mix/item_list/` | Older format, URLs look like `/playlist/name-{mixId}` |
+| Collection | `/api/collection/item_list/` | User-curated saved items |
+| Profile posts | `/api/post/item_list/` | Everything a creator posted |
 
-短剧采集有三个坑，都已处理：
+Three things about drama collection that took real debugging:
 
-- **翻页在页面上下文里按游标推进，不驱动 UI。** 采集器让页面自己发起分页请求，
-  逐页读取直到 `hasMore` 为假。这样做是因为两条基于 UI 的路都被实测证明不可靠：
+- **Pagination advances by cursor inside the page context; the UI is never
+  driven.** Both UI approaches proved unreliable in testing. *Scrolling* moves
+  the video feed to the next video and swaps the whole page out, so you drift
+  away from the series you wanted. *Clicking the `1-24 / 25-48 / 49-72` range
+  tabs* is worse than it looks — those tabs are rendered dynamically, and the
+  same series can render two tabs on one load and none on the next, so you
+  reliably come up short by the last few episodes.
+- **Responses must be filtered by `dramaID`.** Read past the end of one series
+  and the API starts handing you the next one; without filtering, two series get
+  interleaved in your library.
+- **Episode numbers come from `EpisodeNumber`, never from `createTime`.**
 
-  - *滚动*：视频页滚动会翻到下一个视频、整页换掉，越滚越漂离目标剧。
-  - *点分页标签*：`1-24 / 25-48 / 49-72` 这些标签是动态渲染的，同一部剧两次
-    加载，一次渲染出两个标签、一次一个都没有。靠它翻页会稳定地少最后几集。
+## Codec and playback
 
-  UI 怎么变都不影响这条链路，这是选它的主要理由。
+TikTok offers two encodings of the same video, and it's a genuine tradeoff:
 
-- **必须按 `dramaID` 过滤。** 剧集列表读到底会自动接上下一部剧，不过滤的话两部剧
-  的集数会混在一起（实测一次就多混进 24 集）。
-- **集号取自接口的 `EpisodeNumber`，不要按发布时间排。** 同一部剧的几十集往往是
-  同一时刻批量发布的，按 `createTime` 排会得到随机顺序。
+| Codec | Max resolution | Playback |
+|---|---|---|
+| H.264 | 576x1024 | Plays everywhere |
+| H.265 | **1080x1920** | Windows' built-in player needs a paid HEVC extension |
 
-## 登录态怎么搞
+Set `video_codec` in `config.toml` (or `--codec` per run):
 
-**登录态是硬门槛** —— 没有它，TikTok 连列表接口都不打，`playAddr` 也是空的。
+- **`h264`** (default) — 576x1024, no transcoding, plays anywhere.
+- **`h265`** — 1080p. The easy fix for playback is a different player: VLC,
+  PotPlayer, and MPV all handle HEVC natively, with no transcode and no quality loss.
+- **`transcode`** — download 1080p H.265, re-encode to H.264 with ffmpeg.
 
-**操作步骤见 [使用说明.md](使用说明.md) 第一节**（扩展导出 / DevTools 抄请求头两种办法），
-这里只记技术要点：
+Already downloaded? `.\douk convert -t <id>` re-encodes in place. It's idempotent
+and resumable.
 
-- **唯一的凭证文件是 `data/cookies.txt`。** 下载器直接 `--cookies` 喂给 yt-dlp，
-  采集器启动后注入浏览器上下文。`data/browser/` 只是运行缓存，删了会自动重建。
-- **`cookies.txt` 优先于 profile 缓存。** 反过来会有个隐蔽的坑：cookie 过期后
-  重新导出一份新的，profile 里的旧 session 会一直赢、新文件被无视，而输出只说
-  「使用 profile 自带的登录态」，完全看不出问题。
-- **`sessionid` 是 HttpOnly 的**，所以导出时必须包含 HttpOnly cookie，
-  用 `document.cookie` 是拿不到的。DevTools 里 **Request Headers** 的 `Cookie:`
-  行包含全部 cookie（HttpOnly 也在内），`Set-Cookie:` 响应头则不行。
-- 转换和 `verify` 都会校验 `sessionid` 是否存在，缺了直接报错而不是静默降级。
+**Transcoding always increases file size** — H.264 is simply less efficient than
+H.265. Measured on a 30-episode 1080p series (663 kbps source):
 
-### 为什么要手动导出，而不是自动拿
+| CRF | vs. source | Time/episode |
+|---|---|---|
+| 23 | 3.1x | 26s |
+| **26** (default) | **2.3x** | **23s** |
+| 28 | 1.9x | 21s |
 
-`login` / `cookies --from` / `import-profile` 三个命令都还在，但在本机实测都不通：
+`preset slow` was only 5% smaller than `medium` while taking 30% longer, so
+`medium` is fixed. The full series went from 131 MB to 323 MB.
 
-| 方式 | 结果 |
-|---|---|
-| 在 douk 的浏览器里登录 | 登录接口拒绝，自动化环境会被识别 |
-| 从本机浏览器读 cookie 库 | Chrome 127+ 起改用应用绑定加密，读不出明文 |
-| 把浏览器 profile 搬过来 | 加密密钥与原始 profile 路径绑定，换目录即失效 |
-
-结论是**手动导出一次最省事也最稳**，所以文档把它作为唯一推荐路径。
-换台机器或换个浏览器版本上述方式可能可用，但不值得依赖。
-
-cookie 大概能用几周到几个月，失效了重导一次即可。
-
-## 产物
+## Output layout
 
 ```
 data/
-├─ douk.db                    # SQLite：target 表 + aweme 表
-├─ cookies.txt                # 导出给 yt-dlp
-├─ browser/                   # Playwright 持久化 profile（含登录态）
-└─ videos/{合集名}/0001_{aweme_id}_{标题}.mp4
+├─ douk.db                    # SQLite: target + aweme tables
+├─ cookies.txt                # your session (gitignored)
+├─ browser/                   # Playwright runtime cache, safe to delete
+└─ videos/{series}/
+     ├─ 第1集.mp4  第1集.srt  第1集.jpg  第1集.info.json
+     ├─ cover.jpg             # series cover art
+     └─ drama.json            # title / description / genres / runtime
 ```
 
-文件名前缀 `seq` 按 `create_time` **正序**编号（1 = 最早），因为 TikTok 接口返回的是新→旧，
-不重排的话剧集顺序是反的。每次采集后自动重排。
+Filenames follow `filename_template` in `config.toml` (default `第{seq}集`).
+Placeholders: `{seq}` `{seq2}` (zero-padded) `{seq3}` `{id}` `{title}` `{drama}`.
+Use `第{seq2}集` if you want filename sort order to match episode order.
 
-## 编码与播放
+## Troubleshooting
 
-TikTok 对同一个视频提供两套编码，**是个真实取舍**：
+**Run `.\douk doctor` first.** It reports egress IP and geolocation, whether that
+IP is flagged as a proxy, Cloudflare WARP status, TikTok reachability, browser
+launch, ffmpeg, output directory writability, and login state.
 
-| 编码 | 最高分辨率 | 播放兼容性 |
-|---|---|---|
-| H.264 | 576x1024 | 到处都能播 |
-| H.265 (bytevc1) | **1080x1920** | Windows 自带播放器需付费 HEVC 扩展 |
+| Symptom | Fix |
+|---|---|
+| `No video formats found` | No session, or it expired — re-export `cookies.txt` and run `douk verify` |
+| "collected nothing" | Same as above, or a captcha — try `--headful` and clear it by hand |
+| `get region err` on login | The automated environment was detected. Don't log in through douk; export cookies manually. If your normal browser can't log in either, it's your IP (datacenter and VPN ranges get flagged). |
+| Rate limited | Wait 30–60 minutes, change IP, delete `data/browser/` |
+| Downloads are slow or throttled | Lower `concurrency`, raise `delay_min`/`delay_max` |
+| Video won't play | It's H.265 — install VLC, or run `douk convert` |
+| Only got N of M episodes | Network was slow mid-pagination; just run `collect` again |
 
-`config.toml` 的 `video_codec` 三选一，命令行 `--codec` 可临时覆盖：
-
-- `h264`（**默认**）—— `-S vcodec:h264`，实测选中 576x1024，不转码，到处能播。
-- `h265` —— `-S res,vcodec:h265`，实测选中 1080x1920。**最省事的办法是换播放器**：
-  VLC / PotPlayer / MPV 都原生支持 HEVC，不用转码也不损画质。
-- `transcode` —— 下 1080p H.265 再用 ffmpeg 转 H.264，两头兼顾，费 CPU 和磁盘。
-
-`best` / `hevc` / `264` 这类写法会自动归一，非法值直接报错而不是静默降级。
-
-已经下好的文件不用重下，直接转：
+## Moving to another machine
 
 ```powershell
-.\.venv\Scripts\python.exe douk.py convert -t <targetId>
+.\package.bat     # produces douk-package.zip, ~0.05 MB
 ```
 
-`convert` 是幂等的，只挑 H.265 的转，中断了再跑一次会接着做。
+Source and config only. `.venv` (164 MB) hardcodes absolute paths and
+`data/browser` (231 MB) is machine-local state — both must be rebuilt on the
+target, so copying them is pointless. Unzip and run `setup.bat`.
 
-**转码必然让文件变大** —— H.264 编码效率不如 H.265，这是编码格式本身决定的。
-实测 30 集 1080p（源 663kbps）：
+## License and disclaimer
 
-| CRF | 相对源文件 | 耗时/集 |
-|---|---|---|
-| 23 | 3.1x | 26s |
-| **26（默认）** | **2.3x** | **23s** |
-| 28 | 1.9x | 21s |
+Source code is MIT — see [LICENSE](LICENSE).
 
-`preset slow` 只比 `medium` 小 5% 却慢 30%，不划算，所以固定用 `medium`。
-实测整部剧 131 MB → 323 MB。
+**The MIT license covers this repository's code only and grants no rights to any
+downloaded content.** Please read [DISCLAIMER.md](DISCLAIMER.md) before using
+this tool: intended use, copyright ownership, terms-of-service responsibility,
+and credential safety.
 
-## 排错
-
-**先跑 `douk doctor`。** 它会查出口 IP 归属、是否被标记为代理、Cloudflare WARP 是否开着、
-TikTok 可达性、以及本地登录态。
-
-| 现象 | 原因 / 处理 |
-|---|---|
-| 登录页报 `get region err` / `account-api error: [7]` | 先分清：**如果你平时的浏览器能正常登录**，那就是自动化环境被识别了，别在 douk 里登，按 [使用说明.md](使用说明.md) 手动导出 cookie。**如果平时的浏览器也登不上**，才是 IP 问题（Cloudflare WARP、云主机段都会中招），需换住宅 IP |
-| `Could not copy Chrome cookie database` | Chrome 没退干净 —— 托盘图标、后台进程全关掉再试 |
-| `Maximum number of attempts reached` | 已被限频，换 IP 后还要等 30-60 分钟，并删掉 `data/browser/` 重来 |
-| `No video formats found` | 没登录或 cookie 过期 → 重跑 `douk login` |
-| 采集报「一条视频都没采到」 | 同上；或被风控 → `douk collect <url> --headful` 手动过验证码 |
-| 命中验证码 | 换代理 IP；把 `headless` 设为 `false` |
-| 下载慢/被限速 | 降低 `concurrency`，调大 `delay_min/delay_max` |
-| 视频顺序不对 | 短剧的集号取自接口 `cursor`，不会错；其它形态跑一次 `douk collect` 会自动 renumber |
-| 视频打不开 / 提示缺编解码器 | 下的是 H.265。装 VLC/PotPlayer/MPV，或跑 `douk convert` 转 H.264 |
-
-## 许可与免责
-
-源代码以 MIT 许可发布，见 [LICENSE](LICENSE)。
-
-**MIT 只覆盖本仓库的代码，不对任何下载内容授予任何权利。** 使用前请读
-[DISCLAIMER.md](DISCLAIMER.md)：用途限定、版权归属、平台条款责任、凭证安全。
-
-## 合规
-
-仅供个人离线归档与研究。视频版权归原作者，别二次分发或商用。高频抓取会触发平台风控，
-`concurrency` 保持个位数、留足随机延迟。
+This tool is for archiving content you already have access to, for personal
+offline viewing. Downloaded material belongs to its creators. Keep request rates
+modest — `concurrency`, `delay_min`, and `delay_max` exist for that reason.
