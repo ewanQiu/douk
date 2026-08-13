@@ -406,6 +406,50 @@ def relocate(
 
 
 @app.command()
+def retry(
+    target_id: Optional[str] = typer.Option(None, "--target", "-t", help="不填则处理全部"),
+    cfg_path: Optional[Path] = typer.Option(None, "--config", "-c"),
+    stuck_only: bool = typer.Option(
+        False, "--stuck-only", help="只重置已达重试上限、download 不会再碰的那些"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="只看有哪些，不改动"),
+) -> None:
+    """把失败的条目退回待下载，清零重试计数。
+
+    `download` 会跳过 retry 已达 max_retry 的条目，跑这个命令让它们重新被捡起。
+    """
+    cfg = _load(cfg_path)
+    store = Store(cfg.db_path)
+    try:
+        rows = store.failed_rows(target_id, cfg.max_retry, stuck_only)
+        if not rows:
+            scope = "已达上限的" if stuck_only else ""
+            _echo(f"没有{scope}失败条目。", "green")
+            raise typer.Exit(0)
+
+        stuck = sum(1 for r in rows if (r["retry"] or 0) >= cfg.max_retry)
+        _echo(f"失败 {len(rows)} 条，其中 {stuck} 条已达上限"
+              f"（max_retry={cfg.max_retry}，download 会跳过它们）。\n", "cyan")
+
+        # 先按错误归类，重试前总该知道为什么失败
+        buckets: dict[str, int] = {}
+        for r in rows:
+            key = (r["error"] or "未记录错误").strip().splitlines()[0][:80]
+            buckets[key] = buckets.get(key, 0) + 1
+        _echo("失败原因分布：", "cyan")
+        for msg, n in sorted(buckets.items(), key=lambda kv: -kv[1])[:5]:
+            _echo(f"  {n:>3} 条  {msg}", "bright_black")
+
+        if dry_run:
+            _echo("\n--dry-run，未改动。", "cyan")
+            raise typer.Exit(0)
+
+        n = store.reset_retry(target_id, cfg.max_retry, stuck_only)
+        _echo(f"\n已重置 {n} 条为待下载。跑 douk download 重新尝试。", "green")
+    finally:
+        store.close()
+
+
+@app.command()
 def convert(
     target_id: Optional[str] = typer.Option(None, "--target", "-t"),
     cfg_path: Optional[Path] = typer.Option(None, "--config", "-c"),

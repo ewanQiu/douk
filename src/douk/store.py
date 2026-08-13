@@ -175,6 +175,35 @@ class Store:
         )
         self.db.commit()
 
+    def failed_rows(self, target_id: str | None, max_retry: int,
+                    stuck_only: bool) -> list[sqlite3.Row]:
+        """失败条目。stuck_only=True 时只列已达重试上限、download 不会再碰的那些。"""
+        sql = "SELECT * FROM aweme WHERE status='failed' "
+        args: list[Any] = []
+        if stuck_only:
+            sql += "AND retry >= ? "
+            args.append(max_retry)
+        if target_id:
+            sql += "AND target_id=? "
+            args.append(target_id)
+        return self.db.execute(sql + "ORDER BY seq", args).fetchall()
+
+    def reset_retry(self, target_id: str | None, max_retry: int,
+                    stuck_only: bool) -> int:
+        """把失败条目退回 pending 并清零重试计数，让 download 重新捡起它们。"""
+        sql = ("UPDATE aweme SET status='pending', retry=0, error=NULL, updated_at=? "
+               "WHERE status='failed' ")
+        args: list[Any] = [now()]
+        if stuck_only:
+            sql += "AND retry >= ? "
+            args.append(max_retry)
+        if target_id:
+            sql += "AND target_id=? "
+            args.append(target_id)
+        cur = self.db.execute(sql, args)
+        self.db.commit()
+        return cur.rowcount
+
     def stats(self, target_id: str | None = None) -> dict[str, int]:
         sql = "SELECT status, COUNT(*) c FROM aweme "
         args: list[Any] = []

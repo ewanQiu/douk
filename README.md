@@ -177,9 +177,10 @@ Useful flags:
 .\douk sync "<url>" --headful             # watch the browser work
 ```
 
-Other commands: `collect`, `download`, `convert` (re-encode what you already
-have), `relocate` (rename/move files after changing naming settings),
-`info` (show series metadata).
+Other commands: `collect`, `download`, `retry` (requeue episodes that failed
+`max_retry` times and are now being skipped — prints a breakdown of *why* they
+failed first), `convert` (re-encode what you already have), `relocate`
+(rename/move files after changing naming settings), `info` (series metadata).
 
 ## How series are stored on TikTok
 

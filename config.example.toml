@@ -87,7 +87,7 @@ delay_min = 1.0
 delay_max = 3.0
 
 # 单个视频失败多少次后放弃。`douk download` 会跳过 retry 已达上限的条目，
-# 想重试这些得先手动把库里的 retry 清零。
+# 想让它们重新被捡起，跑 `douk retry`（可加 --stuck-only 只针对这些）。
 max_retry = 3
 
 # 附带产物。字幕转 srt、封面转 jpg 都需要 ffmpeg；
