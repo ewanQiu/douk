@@ -1,0 +1,45 @@
+# ============================================================
+# 绝对不能提交的东西
+# ============================================================
+
+# 登录凭证 —— cookies.txt 里的 sessionid 等同于你的 TikTok 账号密码，
+# 泄露出去别人可以直接以你的身份登录。header.txt 是它的原料，同样敏感。
+data/cookies.txt
+data/header.txt
+data/*.txt
+*cookies*.txt
+
+# 浏览器 profile，里面也有完整登录态（而且有几百 MB）
+data/browser/
+
+# 下载的视频等内容 —— 版权归原作者，公开分发会侵权
+data/videos/
+data/**/*.mp4
+data/**/*.srt
+data/**/*.jpg
+data/**/*.png
+data/**/*.info.json
+
+# 数据库：含下载记录和你抓过哪些账号
+data/douk.db
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# ============================================================
+# 环境与产物
+# ============================================================
+.venv/
+__pycache__/
+*.py[cod]
+douk-package.zip
+
+# 本地配置：可能含内网路径、代理地址。
+# 想给别人参考就提交一份 config.example.toml
+config.toml
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+.DS_Store

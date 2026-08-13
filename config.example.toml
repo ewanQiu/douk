@@ -1,0 +1,51 @@
+# 复制这个文件为 config.toml 再改。config.toml 不进版本库（可能含内网路径/代理）。
+
+[net]
+# 海外代理，留空则直连。例: "http://127.0.0.1:7890" 或 "socks5://127.0.0.1:1080"
+# 大陆网络必须填 —— TikTok 屏蔽大陆 IP
+proxy = ""
+# 浏览器 UA，留空用默认
+user_agent = ""
+
+[browser]
+user_data_dir = "data/browser"
+# 用本机真 Chrome 而不是 Playwright 自带的 Chrome for Testing —— 指纹差异小得多。
+# 想用自带构建就留空 ""。可选: chrome / chrome-beta / msedge
+channel = "chrome"
+headless = true
+scroll_wait_ms = 1200
+idle_rounds = 4
+max_scrolls = 400
+
+[download]
+# Windows 路径要用单引号！双引号里 \ 是转义符，"D:\videos" 会报
+# TOMLDecodeError: Unescaped '\' in a string
+#   对: 'D:\videos'   或   "D:/videos"
+out_dir = 'D:\videos'
+
+# 视频编码 —— TikTok 的 H.264 最高只到 576x1024，1080p 只有 H.265(bytevc1)，
+# 而 H.265 在 Windows 自带播放器上要装付费扩展（VLC/PotPlayer/MPV 原生支持）。
+#   h264      直接选 H.264，576x1024，到处能播，不转码（默认）
+#   h265      1080p H.265，画质最好，但播放器要支持
+#   transcode 下 1080p H.265 再用 ffmpeg 转 H.264，两头兼顾，费 CPU 和磁盘
+# 命令行可用 --codec 临时覆盖
+video_codec = "h264"
+
+# 文件名模板。占位符: {seq}集号 {seq2}补零两位 {seq3}补零三位 {id}视频ID
+#                  {title}原标题 {drama}剧名
+#   "第{seq}集"   -> 第1集.mp4    "第{seq2}集" -> 第01集.mp4（补零，排序才正确）
+# 注意 {title} 不可靠：有的作者把标题写成 'XX EP01.mp4'，用它会出现双后缀
+filename_template = "第{seq}集"
+
+# transcode 模式的 CRF。实测相对源文件体积：23 -> 3.1x，26 -> 2.3x，28 -> 1.9x
+transcode_crf = 26
+
+# 并发别调太大，高频抓取会触发风控
+concurrency = 3
+delay_min = 1.0
+delay_max = 3.0
+max_retry = 3
+write_thumbnail = true
+write_info_json = true
+write_subs = true
+group_by_mix = true

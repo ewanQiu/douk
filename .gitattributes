@@ -1,0 +1,19 @@
+# 行尾符锁定，避免跨平台 clone 后脚本行为不一致。
+* text=auto
+
+# Windows 脚本必须是 CRLF —— .bat/.cmd 被检出成 LF 时，
+# 某些 Windows 配置下会解析异常（尤其是带 goto/label 的批处理）。
+*.ps1  text eol=crlf
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+*.py   text eol=lf
+*.md   text eol=lf
+*.toml text eol=lf
+
+# 二进制，别做行尾转换
+*.png  binary
+*.jpg  binary
+*.mp4  binary
+*.zip  binary
+*.db   binary
