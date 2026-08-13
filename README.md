@@ -41,7 +41,7 @@ yourself. That's what douk does.
 | Python | **3.11+** (uses `tomllib`) |
 | Chrome | Used via Playwright's `channel="chrome"`. Alternatively install Playwright's bundled Chromium and set `channel = ""`. |
 | ffmpeg | Optional — only needed for transcoding and thumbnail conversion |
-| Network | Must be able to reach TikTok. Set `proxy` in `config.toml` if yours can't. |
+| Network | Must already be able to reach TikTok. See [Network](#network) below. |
 
 Windows is the tested platform. The Python code is cross-platform, but the
 `setup` / `package` helper scripts are PowerShell.
@@ -68,6 +68,21 @@ python -m venv .venv
 ```
 
 Then copy `config.example.toml` to `config.toml` and set `out_dir`.
+
+## Network
+
+**douk provides no connectivity of its own.** If TikTok is blocked where you are,
+solve that first — the `proxy` setting only points douk at a proxy client that is
+*already running on your machine*; it does not create a tunnel.
+
+| Your setup | `proxy` value |
+|---|---|
+| System-wide VPN, WARP, or router-level routing | **Leave empty** — traffic is already handled below the application layer |
+| Local proxy client (Clash, V2Ray, Shadowsocks, …) | Its listening address, e.g. `http://127.0.0.1:7890` |
+
+Run `.\douk doctor` to see whether TikTok is actually reachable with your current
+configuration. Line quality matters too: residential IPs are far less likely to
+hit captchas than datacenter ranges.
 
 ## Getting a session
 
