@@ -91,8 +91,13 @@ def _check_deps(cfg: Config, r: Report) -> None:
 
 def run(cfg: Config) -> Report:
     r = Report()
-    proxy = cfg.proxy
-    r.ok.append(f"代理配置: {proxy or '（直连）'}")
+    proxy = cfg.effective_proxy()
+    if cfg.proxy:
+        r.ok.append(f"代理配置: {cfg.proxy}")
+    elif proxy:
+        r.ok.append(f"代理配置: 未在 config.toml 指定，沿用系统/环境变量代理 {proxy}")
+    else:
+        r.ok.append("代理配置: 直连（config.toml 未填，系统与环境变量也没有代理）")
 
     _check_deps(cfg, r)
 

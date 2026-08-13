@@ -1,57 +1,97 @@
 # 复制这个文件为 config.toml 再改。config.toml 不进版本库（可能含内网路径/代理）。
+#
+# 标 [指针] 的项指向「外部必须已经存在的东西」—— 填错或对象不存在会直接失败，
+# 改这一项本身不产生任何能力。其余项是纯行为开关。
 
 [net]
-# 填「本机已在运行的代理客户端」的监听地址，例如 Clash 默认 http://127.0.0.1:7890、
-# V2Ray 常见 socks5://127.0.0.1:10808。端口以你的客户端设置为准。
+
+# [指针] 本机已在运行的代理客户端的监听地址。
+#   Clash 默认 http://127.0.0.1:7890，V2Ray 常见 socks5://127.0.0.1:10808，
+#   具体端口以你客户端的设置为准，别照抄。
 #
-# 注意：这一项不会凭空创造连通性。没有代理客户端在跑，填什么地址都是连接被拒。
-# 如果你用的是系统级全局代理（VPN 客户端、WARP、路由器分流），**留空即可** ——
-# 流量已经在系统层走了，douk 不需要再管。
+# 留空不等于直连：会依次回退到 HTTPS_PROXY / HTTP_PROXY 环境变量，
+# 再到系统代理设置（Windows 读注册表）。浏览器、yt-dlp、doctor、封面下载
+# 四条路径统一按这个顺序解析，行为一致。
 #
-# 拿不准就留空，跑一次 douk doctor，它会告诉你 TikTok 通不通。
+# 系统级全局代理（VPN 客户端的 TUN 模式、WARP、路由器分流）下留空即可。
+# 不确定就留空跑一次 douk doctor，它会打印实际生效的代理并测 TikTok 连通性。
 proxy = ""
-# 浏览器 UA，留空用默认
+
+# 覆盖浏览器 UA。**填了会关掉一个自动修正**：headless 模式下 Chrome 的 UA
+# 会自报 HeadlessChrome/xxx，douk 默认会把它改写成正常的 Chrome/xxx；
+# 一旦你显式指定 UA，就以你的为准，那个修正不再生效。没有特别理由请留空。
 user_agent = ""
 
+
 [browser]
+
+# [指针] Playwright 的持久化 profile 目录。纯运行缓存，删掉会自动重建，
+# 不是登录凭证的存放处（那个是 data/cookies.txt）。
 user_data_dir = "data/browser"
-# 用本机真 Chrome 而不是 Playwright 自带的 Chrome for Testing —— 指纹差异小得多。
-# 想用自带构建就留空 ""。可选: chrome / chrome-beta / msedge
+
+# [指针] 用本机已安装的哪个浏览器。可选 chrome / chrome-beta / msedge。
+# 留空则用 Playwright 自带的 Chromium —— 但那需要先跑一次
+# `playwright install chromium` 把它下下来（约 300 MB）。
+# 用本机真 Chrome 的好处是指纹差异小得多。
 channel = "chrome"
+
+# 无头运行。各命令的 --headful 可临时覆盖，调试或手动过验证码时用得上。
 headless = true
-scroll_wait_ms = 1200
-idle_rounds = 4
-max_scrolls = 400
+
+# 下面三项**只影响需要滚动的采集**：主页作品、合集、收藏夹，
+# 以及 `douk dramas` 扫主页上的短剧卡片。
+# 短剧的剧集列表走游标翻页、完全不滚动，改这三项对它没有任何作用。
+scroll_wait_ms = 1200   # 每次滚动后等多久
+idle_rounds = 4         # 连续多少轮没有新内容就认为到底了
+max_scrolls = 400       # 单次采集最多滚多少轮，防死循环
+
 
 [download]
+
+# [指针] 视频输出根目录。必须可写，doctor 会检查。
 # Windows 路径要用单引号！双引号里 \ 是转义符，"D:\videos" 会报
 # TOMLDecodeError: Unescaped '\' in a string
 #   对: 'D:\videos'   或   "D:/videos"
 out_dir = 'D:\videos'
 
-# 视频编码 —— TikTok 的 H.264 最高只到 576x1024，1080p 只有 H.265(bytevc1)，
+# 视频编码 —— TikTok 的 H.264 最高只到 576x1024，1080p 只有 H.265，
 # 而 H.265 在 Windows 自带播放器上要装付费扩展（VLC/PotPlayer/MPV 原生支持）。
 #   h264      直接选 H.264，576x1024，到处能播，不转码（默认）
 #   h265      1080p H.265，画质最好，但播放器要支持
 #   transcode 下 1080p H.265 再用 ffmpeg 转 H.264，两头兼顾，费 CPU 和磁盘
-# 命令行可用 --codec 临时覆盖
+# 命令行 --codec 可临时覆盖。best/hevc/264 这类写法会自动归一，非法值直接报错。
 video_codec = "h264"
+
+# 仅在 video_codec = "transcode" 和 `douk convert` 时生效，其它情况完全不读。
+# 实测相对源文件体积：23 -> 3.1x，26 -> 2.3x，28 -> 1.9x。
+# H.264 效率不如 H.265，转码后变大无法避免。
+transcode_crf = 26
 
 # 文件名模板。占位符: {seq}集号 {seq2}补零两位 {seq3}补零三位 {id}视频ID
 #                  {title}原标题 {drama}剧名
-#   "第{seq}集"   -> 第1集.mp4    "第{seq2}集" -> 第01集.mp4（补零，排序才正确）
-# 注意 {title} 不可靠：有的作者把标题写成 'XX EP01.mp4'，用它会出现双后缀
+#   "第{seq}集"   -> 第1集.mp4    "第{seq2}集" -> 第01集.mp4（按文件名排序才正确）
+# {title} 不可靠：有的作者把标题写成 'XX EP01.mp4'，用它会出现双后缀。
+# 改完可以跑 douk relocate 把已下好的文件按新模板改名，不用重下。
 filename_template = "第{seq}集"
 
-# transcode 模式的 CRF。实测相对源文件体积：23 -> 3.1x，26 -> 2.3x，28 -> 1.9x
-transcode_crf = 26
+# 是否按剧名分子目录。false 则所有视频平铺在 out_dir 下 ——
+# 多部剧混在一起且文件名会撞车，一般不要关。
+# （旧名 group_by_mix 仍可识别）
+group_by_series = true
 
-# 并发别调太大，高频抓取会触发风控
+# 并发下载数。别调太大，高频抓取会触发平台风控，个位数足够。
 concurrency = 3
+
+# 每个下载任务开始前的随机等待区间（秒），同样是为了别把请求打太密。
 delay_min = 1.0
 delay_max = 3.0
+
+# 单个视频失败多少次后放弃。`douk download` 会跳过 retry 已达上限的条目，
+# 想重试这些得先手动把库里的 retry 清零。
 max_retry = 3
+
+# 附带产物。字幕转 srt、封面转 jpg 都需要 ffmpeg；
+# 没装 ffmpeg 时字幕保留原始 vtt、封面会存成认不出类型的 .image。
 write_thumbnail = true
 write_info_json = true
 write_subs = true
-group_by_mix = true

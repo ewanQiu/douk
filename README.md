@@ -72,17 +72,31 @@ Then copy `config.example.toml` to `config.toml` and set `out_dir`.
 ## Network
 
 **douk provides no connectivity of its own.** If TikTok is blocked where you are,
-solve that first — the `proxy` setting only points douk at a proxy client that is
-*already running on your machine*; it does not create a tunnel.
+solve that first — the `proxy` setting only points douk at a proxy that is
+*already running*; it does not create a tunnel.
 
-| Your setup | `proxy` value |
+Once you can reach TikTok, what goes in `proxy` depends on **how** your setup
+routes traffic, not on which product you use (Clash, for instance, can run either
+way):
+
+| How traffic is routed | `proxy` value |
 |---|---|
-| System-wide VPN, WARP, or router-level routing | **Leave empty** — traffic is already handled below the application layer |
-| Local proxy client (Clash, V2Ray, Shadowsocks, …) | Its listening address, e.g. `http://127.0.0.1:7890` |
+| Transparently — VPN/TUN mode, WARP, router-level rules | **Leave empty.** Sockets are already redirected; douk never sees a proxy. |
+| Through a local listening port — the client shows you a port like 7890 | That address, e.g. `http://127.0.0.1:7890` |
+| OS proxy settings — the client ticked "set as system proxy" | **Leave empty.** douk reads the OS setting itself. |
 
-Run `.\douk doctor` to see whether TikTok is actually reachable with your current
-configuration. Line quality matters too: residential IPs are far less likely to
-hit captchas than datacenter ranges.
+Empty does not mean "direct". douk resolves the proxy in this order: this
+setting → `HTTPS_PROXY` / `HTTP_PROXY` environment variables → OS proxy
+settings. All four paths that make requests — browser, yt-dlp, `doctor`, cover
+download — use the same resolution, so they can't disagree.
+
+```powershell
+.\douk doctor
+```
+
+prints the proxy actually in effect and tests whether TikTok is reachable. Line
+quality matters too: residential IPs are far less likely to hit captchas than
+datacenter ranges.
 
 ## Getting a session
 

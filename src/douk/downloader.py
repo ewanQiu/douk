@@ -57,7 +57,7 @@ VIDEO_EXT = {".mp4", ".webm", ".mkv", ".mov", ".m4v"}
 
 
 def _out_base(cfg: Config, target_name: str) -> Path:
-    base = cfg.out_dir / _safe(target_name) if cfg.group_by_mix else cfg.out_dir
+    base = cfg.out_dir / _safe(target_name) if cfg.group_by_series else cfg.out_dir
     base.mkdir(parents=True, exist_ok=True)
     return base
 

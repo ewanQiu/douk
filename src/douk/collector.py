@@ -170,16 +170,16 @@ def list_dramas(user_url: str, ctx: BrowserContext, cfg: Config) -> list[dict]:
     page.goto(user_url, wait_until="domcontentloaded")
     page.wait_for_timeout(6000)
 
-    # 短剧列表分页也是滚出来的
+    # 主页上的短剧卡片是滚出来的（剧集列表不是，那条走游标）
     idle = 0
-    for _ in range(30):
+    for _ in range(cfg.max_scrolls):
         n0 = len(found)
         page.evaluate(SCROLL_PANELS_JS)
         page.mouse.wheel(0, 3000)
-        page.wait_for_timeout(1500)
+        page.wait_for_timeout(cfg.scroll_wait_ms)
         if len(found) == n0:
             idle += 1
-            if idle >= 4:
+            if idle >= cfg.idle_rounds:
                 break
         else:
             idle = 0

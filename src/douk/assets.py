@@ -66,7 +66,7 @@ def save(cfg: Config, store: Store, target_id: str) -> dict:
     dest = _out_base(cfg, name)
     result: dict = {"dir": dest, "cover": None, "meta": None}
 
-    if cover := fetch_cover(row["cover_url"] or "", dest, cfg.proxy):
+    if cover := fetch_cover(row["cover_url"] or "", dest, cfg.effective_proxy()):
         store.upsert_target(target_id, row["kind"], cover_path=str(cover))
         result["cover"] = cover
 

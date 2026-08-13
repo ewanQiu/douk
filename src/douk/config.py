@@ -74,10 +74,32 @@ class Config:
     write_thumbnail: bool = True
     write_info_json: bool = True
     write_subs: bool = True
-    group_by_mix: bool = True
+    group_by_series: bool = True
     video_codec: str = "h264"      # h264 | h265 | transcode
     transcode_crf: int = 26
     filename_template: str = "第{seq}集"
+
+    def effective_proxy(self) -> str:
+        """实际生效的代理地址。
+
+        proxy 留空时各组件的回退行为本来是不一致的：
+          - Chromium / yt-dlp 会自己读环境变量和 Windows 系统代理设置
+          - curl_cffi（doctor 的连通性检查、封面下载）只认环境变量
+        结果是「Clash 开系统代理模式」下 doctor 会报 TikTok 不可达，
+        而采集下载其实是通的。这里统一按 Chromium 的口径解析一次。
+        """
+        if self.proxy:
+            return self.proxy
+        import os
+        for key in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+            if v := os.environ.get(key):
+                return v
+        try:
+            import urllib.request
+            got = urllib.request.getproxies()   # Windows 上会读注册表里的系统代理
+            return got.get("https") or got.get("http") or ""
+        except Exception:
+            return ""
 
     @property
     def db_path(self) -> Path:
@@ -129,7 +151,9 @@ def load(path: Path | None = None) -> Config:
         write_thumbnail=bool(dl.get("write_thumbnail", True)),
         write_info_json=bool(dl.get("write_info_json", True)),
         write_subs=bool(dl.get("write_subs", True)),
-        group_by_mix=bool(dl.get("group_by_mix", True)),
+        # 旧名 group_by_mix 仍可用 —— 目标早就不只是合集了，但别让旧配置突然失效
+        group_by_series=bool(dl.get("group_by_series",
+                                    dl.get("group_by_mix", True))),
         video_codec=normalize_codec(dl.get("video_codec", "h264")),
         transcode_crf=int(dl.get("transcode_crf", 26)),
         filename_template=str(dl.get("filename_template") or "第{seq}集"),
