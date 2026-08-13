@@ -126,22 +126,19 @@ TikTok 上「一整部剧」有四种承载方式，接口完全不同，douk �
 
 短剧采集有三个坑，都已处理：
 
-- **翻页靠重放请求，不碰 UI。** 捕获一次 `/api/drama/episode/item_list/` 的请求
-  URL，之后只改 `cursor` 重放即可 —— **签名参数（`msToken` / `X-Gnarly`）不绑定
-  `cursor`**，改了照样返回 200。这条路是确定性的。
+- **翻页在页面上下文里按游标推进，不驱动 UI。** 采集器让页面自己发起分页请求，
+  逐页读取直到 `hasMore` 为假。这样做是因为两条基于 UI 的路都被实测证明不可靠：
 
-  两条基于 UI 的路都试过，都不可靠：
-  - *滚动*：视频页滚动会翻到下一个视频、整页换掉，越滚越漂离目标剧
-    （实测 URL 从 `...429512` 漂到 `...850824`）。
+  - *滚动*：视频页滚动会翻到下一个视频、整页换掉，越滚越漂离目标剧。
   - *点分页标签*：`1-24 / 25-48 / 49-72` 这些标签是动态渲染的，同一部剧两次
-    加载，一次渲染出 `['1-24','25-48']`、一次一个都没有。49 集的剧永远只能
-    拿到 48 集 —— 第 49 集所需的第三个标签根本不出现。
+    加载，一次渲染出两个标签、一次一个都没有。靠它翻页会稳定地少最后几集。
 
-- **必须按 `dramaID` 过滤。** 剧集列表滚到底会自动串进下一部剧，不过滤的话两部剧
-  的集数会混在一起（实测滚一次就多混进 24 集）。
-- **集号取自 `cursor` 而非发布时间。** 同一部剧的 30 集往往是同一时刻批量发布的，
-  按 `createTime` 排会得到随机顺序。接口的 `cursor` 就是已返回条数，
-  `seq = cursor + 序号` 才是准确集号。
+  UI 怎么变都不影响这条链路，这是选它的主要理由。
+
+- **必须按 `dramaID` 过滤。** 剧集列表读到底会自动接上下一部剧，不过滤的话两部剧
+  的集数会混在一起（实测一次就多混进 24 集）。
+- **集号取自接口的 `EpisodeNumber`，不要按发布时间排。** 同一部剧的几十集往往是
+  同一时刻批量发布的，按 `createTime` 排会得到随机顺序。
 
 ## 登录态怎么搞
 
@@ -160,15 +157,18 @@ TikTok 上「一整部剧」有四种承载方式，接口完全不同，douk �
   行包含全部 cookie（HttpOnly 也在内），`Set-Cookie:` 响应头则不行。
 - 转换和 `verify` 都会校验 `sessionid` 是否存在，缺了直接报错而不是静默降级。
 
-### 在本机实测失败的路线（仅供参考）
+### 为什么要手动导出，而不是自动拿
+
+`login` / `cookies --from` / `import-profile` 三个命令都还在，但在本机实测都不通：
 
 | 方式 | 结果 |
 |---|---|
-| `douk login` 在 douk 浏览器里登 | 触发 `get region err`，自动化控制被识别 |
-| `douk cookies --from chrome` | Chrome 127+ 的 App-Bound Encryption，`Failed to decrypt with DPAPI` |
-| `douk import-profile` 复制密钥+cookie 库 | ABE 密钥还绑定原始 user-data-dir 路径，换目录解不开 |
+| 在 douk 的浏览器里登录 | 登录接口拒绝，自动化环境会被识别 |
+| 从本机浏览器读 cookie 库 | Chrome 127+ 起改用应用绑定加密，读不出明文 |
+| 把浏览器 profile 搬过来 | 加密密钥与原始 profile 路径绑定，换目录即失效 |
 
-这几个命令都保留着 —— 换台机器或换个 Chrome 版本可能就通了，但别指望。
+结论是**手动导出一次最省事也最稳**，所以文档把它作为唯一推荐路径。
+换台机器或换个浏览器版本上述方式可能可用，但不值得依赖。
 
 cookie 大概能用几周到几个月，失效了重导一次即可。
 
@@ -230,7 +230,7 @@ TikTok 可达性、以及本地登录态。
 
 | 现象 | 原因 / 处理 |
 |---|---|
-| 登录页报 `get region err` / `account-api error: [7]` | 两种原因，先分清：**如果你平时的浏览器能正常登录**，那就是自动化指纹被识别了 —— 确认 `config.toml` 里 `channel = "chrome"`，或直接改用 `douk cookies --from chrome` 绕开登录。**如果平时的浏览器也登不上**，才是 IP 问题（Cloudflare WARP、云主机段都会中招），需换住宅 IP |
+| 登录页报 `get region err` / `account-api error: [7]` | 先分清：**如果你平时的浏览器能正常登录**，那就是自动化环境被识别了，别在 douk 里登，按 [使用说明.md](使用说明.md) 手动导出 cookie。**如果平时的浏览器也登不上**，才是 IP 问题（Cloudflare WARP、云主机段都会中招），需换住宅 IP |
 | `Could not copy Chrome cookie database` | Chrome 没退干净 —— 托盘图标、后台进程全关掉再试 |
 | `Maximum number of attempts reached` | 已被限频，换 IP 后还要等 30-60 分钟，并删掉 `data/browser/` 重来 |
 | `No video formats found` | 没登录或 cookie 过期 → 重跑 `douk login` |
@@ -239,6 +239,13 @@ TikTok 可达性、以及本地登录态。
 | 下载慢/被限速 | 降低 `concurrency`，调大 `delay_min/delay_max` |
 | 视频顺序不对 | 短剧的集号取自接口 `cursor`，不会错；其它形态跑一次 `douk collect` 会自动 renumber |
 | 视频打不开 / 提示缺编解码器 | 下的是 H.265。装 VLC/PotPlayer/MPV，或跑 `douk convert` 转 H.264 |
+
+## 许可与免责
+
+源代码以 MIT 许可发布，见 [LICENSE](LICENSE)。
+
+**MIT 只覆盖本仓库的代码，不对任何下载内容授予任何权利。** 使用前请读
+[DISCLAIMER.md](DISCLAIMER.md)：用途限定、版权归属、平台条款责任、凭证安全。
 
 ## 合规
 
