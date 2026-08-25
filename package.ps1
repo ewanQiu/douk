@@ -24,13 +24,40 @@ Write-Host "打包 douk..." -ForegroundColor Cyan
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 
 # --- 源码与文档 ---
-Copy-Item (Join-Path $root "src") (Join-Path $stage "src") -Recurse
-foreach ($f in @("douk.py", "douk.cmd", "requirements.txt", "config.toml",
-                 "README.md", "使用说明.md",
-                 "setup.ps1", "setup.bat", "package.ps1", "package.bat")) {
-    $p = Join-Path $root $f
-    if (Test-Path $p) { Copy-Item $p (Join-Path $stage $f) }
+# 清单以 git 跟踪的文件为准：仓库的 .gitignore 已经定义了「什么该分发」，
+# 让打包跟着它走，以后新增文件不会再漏。
+# 硬编码清单吃过亏 —— 加了 LICENSE / DISCLAIMER / README.zh-CN / config.example
+# 之后清单没跟着更新，别人拿到的包缺了一半文档。
+$files = @()
+try {
+    Push-Location $root
+    $files = git -c core.quotepath=false ls-files 2>$null
+    Pop-Location
+} catch { }
+
+if (-not $files) {
+    Write-Host "  git 不可用，回退到静态清单" -ForegroundColor Yellow
+    $files = @("douk.py", "douk.cmd", "requirements.txt", "config.example.toml",
+               "README.md", "README.zh-CN.md", "使用说明.md",
+               "LICENSE", "DISCLAIMER.md",
+               "setup.ps1", "setup.bat", "package.ps1", "package.bat")
+    $files += (Get-ChildItem (Join-Path $root "src") -Recurse -Filter *.py |
+               ForEach-Object { $_.FullName.Substring($root.Length + 1).Replace('\','/') })
 }
+
+# config.toml 绝不打包：里面是本机路径（可能含内网地址），
+# 而且会覆盖掉接收方自己的配置。给模板就够了。
+$files = $files | Where-Object { $_ -and $_ -ne "config.toml" }
+
+foreach ($rel in $files) {
+    $src = Join-Path $root $rel
+    if (-not (Test-Path $src)) { continue }
+    $dst = Join-Path $stage $rel
+    $dir = Split-Path $dst -Parent
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    Copy-Item $src $dst
+}
+Write-Host "  打包 $($files.Count) 个文件" -ForegroundColor Gray
 
 # 清掉 __pycache__，否则会带上本机的 .pyc
 Get-ChildItem $stage -Recurse -Directory -Filter "__pycache__" |
@@ -70,7 +97,12 @@ Write-Host "完成: $outPath  ($mb MB)" -ForegroundColor Green
 Write-Host ""
 Write-Host "在目标电脑上：" -ForegroundColor Cyan
 Write-Host "  1. 解压到任意目录"
-Write-Host "  2. 双击 setup.bat（别直接跑 setup.ps1，Windows 默认禁止运行 .ps1）"
+Write-Host "  2. 复制 config.example.toml 为 config.toml，改里面的 out_dir"
+Write-Host "  3. 双击 setup.bat（别直接跑 setup.ps1，Windows 默认禁止运行 .ps1）"
+Write-Host ""
+Write-Host "升级已有安装（对方装过旧版）：" -ForegroundColor Cyan
+Write-Host "  解压到新目录，把旧目录的 data\ 整个搬过来，config.toml 也搬过来"
+Write-Host "  再跑 setup.bat。数据库会自动补列，登录态和下载记录都保留。"
 if (-not $IncludeCookies) {
     Write-Host "  3. 按 使用说明.md 重新导出一次 cookie"
 }
