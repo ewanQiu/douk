@@ -38,8 +38,9 @@ douk-package.zip
 # 想给别人参考就提交一份 config.example.toml
 config.toml
 
-# 编辑器
+# 编辑器与工具的本地配置
 .vscode/
 .idea/
+.claude/
 *.swp
 .DS_Store
