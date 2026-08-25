@@ -16,6 +16,15 @@ from playwright.sync_api import BrowserContext
 
 from .browser import new_page
 
+# 短剧的新地址形态：/shortdrama/episode/{dramaID}/{第几集}
+# 这里的数字**直接就是 dramaID**（接口参数印证过），比旧的 /video/{aweme_id}
+# 好办 —— 旧形态得开页面反查这条视频属于哪部剧，新形态正则就能拿到。
+# 末尾集号可有可无，detail 变体也一并认。
+RE_SHORTDRAMA = re.compile(
+    r"tiktok\.com/(?:[\w-]+/)?shortdrama/(?:episode|detail)/(?P<id>\d{8,})"
+    r"(?:/(?P<ep>\d+))?"
+)
+
 RE_PLAYLIST = re.compile(r"tiktok\.com/@(?P<user>[\w.-]+)/playlist/(?P<slug>[^/?#]*?)-(?P<id>\d{8,})")
 RE_COLLECT = re.compile(r"tiktok\.com/@(?P<user>[\w.-]+)/collection/(?P<slug>[^/?#]*?)-(?P<id>\d{8,})")
 RE_VIDEO = re.compile(r"tiktok\.com/@(?P<user>[\w.-]+)/video/(?P<id>\d+)")
@@ -57,7 +66,13 @@ def strip_episode_suffix(title: str) -> str:
 
 
 def parse_static(url: str) -> Target | None:
-    """纯正则能定的，不开浏览器。"""
+    """纯正则能定的，不开浏览器。
+
+    短剧目标的 name 这里留空 —— 剧名只有接口才知道。resolve() 会补上，
+    collect 阶段也会用接口返回的 dramaName 覆盖，最终落盘目录名是对的。
+    """
+    if m := RE_SHORTDRAMA.search(url):
+        return Target("drama", m["id"], url, "", "")
     if m := RE_PLAYLIST.search(url):
         return Target("mix", m["id"], url, _slug_name(m["slug"]), m["user"])
     if m := RE_COLLECT.search(url):
@@ -68,9 +83,52 @@ def parse_static(url: str) -> Target | None:
     return None
 
 
+def drama_name(drama_id: str, url: str, ctx: BrowserContext) -> str:
+    """开页面拿剧名。/shortdrama/ 地址里只有 ID，剧名得问接口。"""
+    got: dict = {}
+
+    def on_response(resp) -> None:
+        if got.get("name"):
+            return
+        if "/api/drama/detail" in resp.url:
+            try:
+                di = (resp.json().get("dramaInfo") or {})
+            except Exception:
+                return
+            if nm := (di.get("dramaName") or "").strip():
+                got["name"] = nm
+        elif "/api/drama/episode/item_list" in resp.url:
+            try:
+                items = resp.json().get("itemList") or []
+            except Exception:
+                return
+            for it in items:
+                di = it.get("dramaInfo") or {}
+                if nm := (di.get("dramaName") or "").strip():
+                    got["name"] = nm
+                    return
+
+    page = new_page(ctx)
+    page.on("response", on_response)
+    try:
+        page.goto(url, wait_until="domcontentloaded")
+        for _ in range(25):
+            if got.get("name"):
+                break
+            page.wait_for_timeout(1000)
+    except Exception:
+        pass
+    finally:
+        page.remove_listener("response", on_response)
+    return got.get("name", "")
+
+
 def resolve(url: str, ctx: BrowserContext) -> Target:
     """静态解析不出来（单条视频）时，开页面反查它属于哪部剧 / 哪个合集。"""
     if t := parse_static(url):
+        # /shortdrama/ 地址正则只能拿到 ID，剧名补一下，否则落盘目录名会是一串数字
+        if t.kind == "drama" and not t.name:
+            t.name = drama_name(t.target_id, url, ctx) or f"drama {t.target_id}"
         return t
 
     m = RE_VIDEO.search(url)

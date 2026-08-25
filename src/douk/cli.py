@@ -236,7 +236,9 @@ def resolve(
 ) -> None:
     """看看一条链接会被解析成什么采集目标（不下载）。"""
     cfg = _load(cfg_path)
-    if t := resolver.parse_static(url):
+    # 静态解析出的短剧只有 ID、没有剧名，这种还得开浏览器补名字
+    t = resolver.parse_static(url)
+    if t and t.name:
         _echo(str(t), "green")
         return
     with br.session(cfg, headless=not headful) as ctx:

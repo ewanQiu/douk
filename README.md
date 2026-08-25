@@ -163,6 +163,7 @@ Accepted URLs:
 
 | Input | Behavior |
 |---|---|
+| `/shortdrama/episode/123/1` | A drama series' own page. The number **is** the series ID, so this resolves without a lookup. |
 | `/@user/video/123` | Finds which series the video belongs to, grabs all of it. Falls back to the whole profile if it isn't part of one. |
 | `/@user/playlist/xxx-123` | The whole playlist/mix |
 | `/@user/collection/xxx-123` | The whole collection |

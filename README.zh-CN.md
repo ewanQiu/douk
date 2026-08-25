@@ -120,6 +120,7 @@ douk.py status                 # 看库存
 
 | 输入 | 行为 |
 |---|---|
+| `/shortdrama/episode/123/1` | 短剧独立页。URL 里那串数字**就是 dramaID**，无需反查 |
 | `/@user/video/123` | 反查该视频属于哪部剧 → 抓整部；不属于任何剧则退化为采主页 |
 | `/@user/playlist/xxx-123` | 采整个合集 |
 | `/@user/collection/xxx-123` | 采整个收藏夹 |
