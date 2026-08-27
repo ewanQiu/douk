@@ -1,6 +1,7 @@
 """douk 命令行入口。"""
 from __future__ import annotations
 
+import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -584,6 +585,42 @@ def dramas(
     for d in items:
         _echo(f"  {d['drama_id']:<22} {d['num_videos']:>3} 集   {d['name']}")
     _echo("\n用 douk sync <该剧任一集的视频链接> 抓取整部。", "bright_black")
+
+
+@app.command()
+def version() -> None:
+    """看当前是什么版本 —— 判断该不该更新、能不能只覆盖部分文件时用得上。"""
+    import subprocess
+    from . import __version__
+
+    root = config.ROOT
+    _echo(f"douk {__version__}")
+
+    # 从 git 仓库读；打包分发的副本没有 .git，改读打包时写入的 VERSION
+    rev = ""
+    if (root / ".git").exists():
+        try:
+            # 必须显式指定 utf-8：Windows 下 text=True 走系统 gbk，
+            # 提交信息里的中文会直接 UnicodeDecodeError
+            p = subprocess.run(["git", "-C", str(root), "log", "-1",
+                                "--format=%h %cs %s"],
+                               capture_output=True, text=True,
+                               encoding="utf-8", errors="replace", timeout=30)
+            if p.returncode == 0:
+                rev = p.stdout.strip()
+        except Exception:
+            pass
+    elif (vf := root / "VERSION").exists():
+        # utf-8-sig：PowerShell 写 utf8 会带 BOM，不剥掉会显示成一个乱字符
+        rev = vf.read_text(encoding="utf-8-sig").strip()
+    _echo(f"  代码版本: {rev or '未知（既非 git 仓库，也没有 VERSION 文件）'}")
+
+    try:
+        import yt_dlp
+        _echo(f"  yt-dlp  : {yt_dlp.version.__version__}")
+    except Exception:
+        _echo("  yt-dlp  : 不可用", "yellow")
+    _echo(f"  Python  : {sys.version.split()[0]}")
 
 
 @app.command()

@@ -59,6 +59,18 @@ foreach ($rel in $files) {
 }
 Write-Host "  打包 $($files.Count) 个文件" -ForegroundColor Gray
 
+# 写入版本标记：分发出去的副本没有 .git，靠这个文件回答「这台是什么版本」。
+# 没它的话，接收方只能靠猜，而「只覆盖某几个文件」这种操作恰恰依赖准确的版本。
+try {
+    Push-Location $root
+    $rev = git log -1 --format="%h %cs %s" 2>$null
+    Pop-Location
+    if ($rev) {
+        Set-Content -Path (Join-Path $stage "VERSION") -Value $rev -Encoding utf8
+        Write-Host "  版本标记: $rev" -ForegroundColor Gray
+    }
+} catch { }
+
 # 清掉 __pycache__，否则会带上本机的 .pyc
 Get-ChildItem $stage -Recurse -Directory -Filter "__pycache__" |
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
