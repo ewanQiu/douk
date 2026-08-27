@@ -111,7 +111,13 @@ def build_cmd(cfg: Config, row, target_name: str) -> list[str]:
         ytdlp_bin(), row["web_url"],
         "-o", str(_outtmpl(cfg, row, target_name)),
         "--no-warnings", "--no-progress", "--no-playlist",
-        "--retries", "3", "--fragment-retries", "3",
+        # 别下调这两个：yt-dlp 自己的默认就是 10。之前写死 3 反而比默认更脆，
+        # 而且没有退避 —— 三次重试挤在几秒内，一次网络抖动就够全撞上。
+        # 典型症状是 curl (35) OpenSSL SSL_connect: Connection closed。
+        "--retries", "10", "--fragment-retries", "10",
+        # 指数退避：1s、2s、4s… 封顶 30s，给瞬时故障留出恢复窗口
+        "--retry-sleep", "exp=1:30",
+        "--retry-sleep", "fragment:exp=1:20",
         "--socket-timeout", "30",
         "--no-overwrites", "--continue",
         "--print", "after_move:%(filepath)s",

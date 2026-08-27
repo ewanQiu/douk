@@ -34,6 +34,36 @@ def _load(cfg_path: Optional[Path], codec: Optional[str] = None) -> config.Confi
 
 CODEC_HELP = "视频编码: h264(默认,576x1024,到处能播) / h265(1080p,播放器要支持) / transcode(1080p转H.264)"
 
+# 失败原因决定该怎么办：网络抖动重跑就行，403 是登录态问题，重跑一万次也没用
+TRANSIENT = ("ssl", "connection", "timeout", "timed out", "curl", "reset",
+             "temporarily", "eof", "incomplete")
+AUTH_FAIL = ("403", "401", "forbidden", "no video formats", "unauthorized")
+
+
+def _hint_failures(store: Store, cfg: config.Config, target_id: Optional[str]) -> None:
+    """按失败原因给出下一步，而不是笼统一句「再跑一次」。"""
+    rows = store.failed_rows(target_id, cfg.max_retry, stuck_only=False)
+    if not rows:
+        return
+    blob = " ".join((r["error"] or "").lower() for r in rows)
+    stuck = sum(1 for r in rows if (r["retry"] or 0) >= cfg.max_retry)
+
+    if any(k in blob for k in AUTH_FAIL):
+        _echo("  失败里有 403/无可用格式，多半是 cookie 过期 —— "
+              "先跑 douk verify，失效就重新导出。", "yellow")
+    elif any(k in blob for k in TRANSIENT):
+        _echo("  失败都是网络类错误（SSL/超时/连接中断），瞬时问题，"
+              "直接再跑一次本命令即可。", "yellow")
+        _echo("  仍然频繁失败的话，把 config.toml 的 concurrency 调小、"
+              "delay_min/delay_max 调大。", "bright_black")
+    else:
+        _echo("  再跑一次本命令会自动重试。", "yellow")
+
+    if stuck:
+        t = f" -t {target_id}" if target_id else ""
+        _echo(f"  其中 {stuck} 条已达重试上限、不会再被自动捡起，"
+              f"跑 douk retry{t} 让它们重新排队。", "yellow")
+
 
 def _echo(msg: str, color: str = "") -> None:
     typer.secho(msg, fg=color or None)
@@ -313,8 +343,10 @@ def download(
             cfg, store, target_id, name, limit=limit,
             on_event=lambda kind, m: _echo("  " + m, "green" if kind == "ok" else "red"),
         )
-        _echo(f"下载结束：成功 {ok}，失败 {bad}。失败的再跑一次本命令会自动重试。",
+        _echo(f"下载结束：成功 {ok}，失败 {bad}。",
               "green" if not bad else "yellow")
+        if bad:
+            _hint_failures(store, cfg, target_id)
     finally:
         store.close()
 
@@ -365,6 +397,8 @@ def sync(
             on_event=lambda kind, m: _echo("  " + m, "green" if kind == "ok" else "red"),
         )
         _echo(f"下载结束：成功 {ok}，失败 {bad}。", "green" if not bad else "yellow")
+        if bad:
+            _hint_failures(store, cfg, target.target_id)
     finally:
         store.close()
 
