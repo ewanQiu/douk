@@ -47,6 +47,30 @@ def _check_deps(cfg: Config, r: Report) -> None:
     except Exception as e:
         r.bad.append(f"yt-dlp 不可用: {type(e).__name__}")
 
+    # curl_cffi 与伪装可用性：版本超出 yt-dlp 支持区间时，--impersonate 的
+    # 所有目标会变成 unavailable，伪装静默失效 —— 两台机器行为不一致时，
+    # 这里往往就是差异点。
+    try:
+        import curl_cffi
+        ver = curl_cffi.__version__
+        parts = tuple(int(x) for x in ver.split(".")[:2])
+        supported = ver == "0.5.10" or (0, 10) <= parts < (0, 16)
+        try:
+            from .downloader import has_impersonate
+            active = has_impersonate()
+        except Exception:
+            active = False
+        if supported and active:
+            r.ok.append(f"curl_cffi {ver}，--impersonate 可用")
+        elif not supported:
+            r.warn.append(
+                f"curl_cffi {ver} 超出 yt-dlp 支持区间(0.5.10 / 0.10.x-0.15.x)，"
+                f"--impersonate 全部目标不可用。修：pip install \"curl_cffi>=0.10,<0.16\"")
+        else:
+            r.warn.append(f"curl_cffi {ver} 版本合规，但 --impersonate 探测不到可用目标")
+    except ImportError:
+        r.warn.append("没装 curl_cffi，--impersonate 不可用（有 cookie 时通常也能下）")
+
     # 浏览器：channel 指定时驱动本机真浏览器，否则用 Playwright 自带的
     try:
         from playwright.sync_api import sync_playwright
