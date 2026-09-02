@@ -1,5 +1,11 @@
-yt-dlp>=2026.7.4
+# 下限别下调：TikTok 改过一次响应格式，2026.7.4 的提取器会报
+# "Unexpected response from webpage request"，2026.8.19 修好了。
+# 这类错误的第一反应永远是先升级 yt-dlp。
+yt-dlp>=2026.8.19
 playwright>=1.62.0
-curl_cffi>=0.16.0
+# yt-dlp 只支持 0.5.10 与 0.10.x-0.15.x；装 0.16+ 会被判为 unsupported，
+# 导致 --impersonate 全部目标不可用、伪装静默失效（TikTok 侧表现为
+# "Unexpected response from webpage request"）。别放宽这个上界。
+curl_cffi>=0.10,<0.16
 typer>=0.27.0
 httpx>=0.28.0

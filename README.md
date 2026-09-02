@@ -265,6 +265,7 @@ launch, ffmpeg, output directory writability, and login state.
 
 | Symptom | Fix |
 |---|---|
+| `Unexpected response from webpage request` | TikTok changed its response format and your yt-dlp can no longer parse it — run `pip install -U yt-dlp`. **Not a cookie problem**; re-exporting won't help. Measured: 2026.7.4 fails on every video, 2026.8.19 works. |
 | `No video formats found` | No session, or it expired — re-export `cookies.txt` and run `douk verify` |
 | "collected nothing" | Same as above, or a captcha — try `--headful` and clear it by hand |
 | `get region err` on login | The automated environment was detected. Don't log in through douk; export cookies manually. If your normal browser can't log in either, it's your IP (datacenter and VPN ranges get flagged). |

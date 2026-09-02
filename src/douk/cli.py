@@ -35,10 +35,16 @@ def _load(cfg_path: Optional[Path], codec: Optional[str] = None) -> config.Confi
 
 CODEC_HELP = "视频编码: h264(默认,576x1024,到处能播) / h265(1080p,播放器要支持) / transcode(1080p转H.264)"
 
-# 失败原因决定该怎么办：网络抖动重跑就行，403 是登录态问题，重跑一万次也没用
+# 失败原因决定该怎么办，指错方向比不给提示更坏：
+#   提取器过时 -> 升级 yt-dlp（TikTok 改过响应格式，实测 2026.7.4 全挂、
+#                 2026.8.19 正常）。这类必须排在最前，它最具体。
+#   登录态失效 -> 重导 cookie，重跑一万次也没用
+#   网络抖动   -> 直接重跑
+STALE_EXTRACTOR = ("unexpected response", "unable to extract",
+                   "please report this issue", "extractor")
+AUTH_FAIL = ("403", "401", "forbidden", "no video formats", "unauthorized")
 TRANSIENT = ("ssl", "connection", "timeout", "timed out", "curl", "reset",
              "temporarily", "eof", "incomplete")
-AUTH_FAIL = ("403", "401", "forbidden", "no video formats", "unauthorized")
 
 
 def _hint_failures(store: Store, cfg: config.Config, target_id: Optional[str]) -> None:
@@ -49,7 +55,12 @@ def _hint_failures(store: Store, cfg: config.Config, target_id: Optional[str]) -
     blob = " ".join((r["error"] or "").lower() for r in rows)
     stuck = sum(1 for r in rows if (r["retry"] or 0) >= cfg.max_retry)
 
-    if any(k in blob for k in AUTH_FAIL):
+    if any(k in blob for k in STALE_EXTRACTOR):
+        _echo("  TikTok 改了响应格式，当前 yt-dlp 解析不了 —— 先升级它：", "yellow")
+        # raw string：路径里的 \. \S \p 都不是合法转义，普通字符串会告警
+        _echo(r"    .\.venv\Scripts\python.exe -m pip install -U yt-dlp", "cyan")
+        _echo("  升完再跑一次本命令。这类错误和 cookie 无关，别去重导。", "bright_black")
+    elif any(k in blob for k in AUTH_FAIL):
         _echo("  失败里有 403/无可用格式，多半是 cookie 过期 —— "
               "先跑 douk verify，失效就重新导出。", "yellow")
     elif any(k in blob for k in TRANSIENT):

@@ -30,11 +30,17 @@ Playwright（真浏览器，channel="chrome"）
 yt-dlp（带 cookie）并发下载 → data/videos/{剧名}/第1集.mp4
 ```
 
-`--impersonate` 会自动探测可用性 —— `curl_cffi` 装了不代表能用，版本超出 yt-dlp
-兼容区间时所有目标都是 unavailable，硬传这个参数会让每个下载任务直接失败。
-有 cookie 的情况下本来也不需要伪装。
-
 好处是 TikTok 改签名算法、改 DOM 结构都不影响采集链路。
+
+不过**采集链路稳不代表下载链路稳**：下载走 yt-dlp，它的 TikTok 提取器依赖
+页面响应格式，TikTok 一改就得等上游更新。实测 2026.7.4 全部报
+`Unexpected response from webpage request`，升到 2026.8.19 即恢复。
+所以 `requirements.txt` 里的 yt-dlp 下限别下调，遇到这个错先升级它。
+
+`curl_cffi` 的版本上界也别放宽：yt-dlp 只支持 0.5.10 与 0.10.x–0.15.x，
+装 0.16+ 会被判为 unsupported，`--impersonate` 所有目标变成 unavailable、
+伪装静默失效。代码里 `has_impersonate()` 会先探测再决定是否传这个参数，
+免得在不支持的环境下每个任务直接失败。
 
 ## 安装
 
@@ -256,6 +262,7 @@ TikTok 可达性、以及本地登录态。
 | 登录页报 `get region err` / `account-api error: [7]` | 先分清：**如果你平时的浏览器能正常登录**，那就是自动化环境被识别了，别在 douk 里登，按 [使用说明.md](使用说明.md) 手动导出 cookie。**如果平时的浏览器也登不上**，才是 IP 问题（Cloudflare WARP、云主机段都会中招），需换住宅 IP |
 | `Could not copy Chrome cookie database` | Chrome 没退干净 —— 托盘图标、后台进程全关掉再试 |
 | `Maximum number of attempts reached` | 已被限频，换 IP 后还要等 30-60 分钟，并删掉 `data/browser/` 重来 |
+| `Unexpected response from webpage request` | TikTok 改了响应格式，当前 yt-dlp 解析不了 —— `pip install -U yt-dlp` 升级即可。**和 cookie 无关**，别去重导。实测 2026.7.4 全挂、2026.8.19 正常 |
 | `No video formats found` | 没登录或 cookie 过期 → 重新导出 `cookies.txt`，跑 `douk verify` |
 | 采集报「一条视频都没采到」 | 同上；或被风控 → `douk collect <url> --headful` 手动过验证码 |
 | 命中验证码 | 换代理 IP；把 `headless` 设为 `false` |
